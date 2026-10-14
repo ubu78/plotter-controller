@@ -1,0 +1,38 @@
+#!/bin/bash
+# AppRun — запуск Plotter Controller внутри AppImage
+HERE="$(dirname "$(readlink -f "${0}")")"
+
+APP_DIR="$HERE/usr/lib/app"
+NODE_BIN="$HERE/usr/bin/node"
+
+# В AppImage нет своего udevadm — используем системный для определения списка COM-портов
+if ! command -v udevadm >/dev/null 2>&1; then
+  for d in /sbin /usr/sbin /bin /usr/bin; do
+    if [ -x "$d/udevadm" ]; then
+      export PATH="$PATH:$d"
+      break
+    fi
+  done
+fi
+
+export PORT="${PORT:-8765}"
+
+echo "=================================================="
+echo "  Plotter Controller (GRBL / Scalable Pen Plotter)"
+echo "  Откройте в браузере: http://localhost:${PORT}"
+echo "  Для выхода: Ctrl+C"
+echo "=================================================="
+
+# Пытаемся открыть браузер (если возможно)
+open_browser() {
+  for b in xdg-open sensible-browser firefox google-chrome chromium chromium-browser; do
+    if command -v "$b" >/dev/null 2>&1; then
+      ("$b" "http://localhost:${PORT}" >/dev/null 2>&1 &)
+      return 0
+    fi
+  done
+  return 1
+}
+open_browser || echo "[info] Браузер не открыт автоматически — перейдите по ссылке выше."
+
+exec "$NODE_BIN" "$APP_DIR/server/server.js"
