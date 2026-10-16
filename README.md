@@ -1,0 +1,73 @@
+# Plotter Controller
+
+Веб-приложение для управления перовым плоттером на базе **GRBL** (например, [Scalable-Pen-Plotter](https://github.com/ubu78/Scalable-Pen-Plotter)) по последовательному порту.
+
+## Возможности
+
+- 🔌 Подключение к GRBL через COM/USB-порт, статус, $-параметры, soft-reset, feed hold
+- 🖼 Импорт SVG → G-code с автомасштабированием под лист (**макс. формат — A4**)
+- ✍️ **Текст / Markdown → G-code**: вставляете текст или .md — программа сама раскладывает строки и генерирует G-code
+- 📄 **Документ → G-code**: загрузка PDF / DOCX / TXT / MD — извлечение текста и конвертация в один клик
+- 🌐 Выбор шрифтов **Google Fonts** (с проверкой покрытия кириллицы), настройка размера, межстрочного интервала, полей
+- 🗺 Визуальный предпросмотр траектории пера, ручное управление (Jog), подача G-code на плоттер
+
+## Быстрый старт (из исходников)
+
+Требуется Node.js ≥ 18.
+
+```bash
+npm install
+npm run dev        # сервер + фронтенд в режиме разработки
+# или
+npm run build && npm start   # продакшн-сборка
+```
+
+Откройте http://localhost:8765
+
+### Доступ к последовательному порту (Linux)
+
+```bash
+sudo usermod -aG dialout $USER   # затем перелогиниться
+```
+
+## Сборка AppImage (Linux x86_64)
+
+```bash
+./appimage/build-appimage.sh
+```
+
+Скрипт собирает фронтенд, скачивает встроенный рантайм Node.js и упаковывает всё в
+`appimage/Plotter_Controller-0.1.0-x86_64.AppImage`. Запуск:
+
+```bash
+./Plotter_Controller-0.1.0-x86_64.AppImage
+# если FUSE недоступен:
+./Plotter_Controller-0.1.0-x86_64.AppImage --appimage-extract-and-run
+```
+
+## Структура
+
+```
+plotter-controller/
+├── src/            # React-фронтенд (Vite)
+│   ├── components/ # панели: подключение, SVG, текст→G-code, документ→G-code, предпросмотр
+│   ├── fonts.js    # список шрифтов Google Fonts
+│   └── api.js      # клиент REST/WS
+├── server/         # Express + WebSocket + serialport
+│   ├── grbl.js             # обмен с GRBL
+│   ├── svgToGcode.js       # SVG → G-code
+│   ├── textToGcode.js      # текст/Markdown → G-code (TTF-глифы)
+│   ├── docToText.js        # извлечение текста из PDF/DOCX/TXT/MD
+│   ├── documentToGcode.js  # документ → раскладка → G-code
+│   └── server.js           # HTTP/WS-эндпоинты
+└── appimage/       # сборка AppImage (AppRun, .desktop, иконки, скрипт)
+```
+
+## Ограничения оборудования
+
+- Максимальный размер бумаги — **A4** (210 × 297 мм); всё автоматически вписывается в область печати плоттера.
+- Поднимаемая/опускаемая перьевая ось управляется через `M3/M5` (или Z-probe GRBL) — настраивается в параметрах подключения.
+
+## Лицензия
+
+MIT
