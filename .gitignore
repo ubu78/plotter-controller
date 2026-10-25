@@ -1,0 +1,10 @@
+node_modules/
+dist/
+plotter-controller/appimage/AppDir/
+plotter-controller/appimage/squashfs-root/
+plotter-controller/appimage/.tools/
+plotter-controller/appimage/appstage/node_modules/
+plotter-controller/appimage/*.AppImage
+plotter-controller/appimage/node-v*.tar.xz
+plotter-controller/appimage/appimagetool.bin
+cmaptest.js

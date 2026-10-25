@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Plotter Controller
+Comment=GRBL pen plotter controller (Scalable Pen Plotter)
+Exec=AppRun
+Icon=plotter-controller
+Terminal=false
+Categories=Utility;Graphics;
+X-AppImage-Version=0.1.0

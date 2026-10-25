@@ -1,0 +1,143 @@
+#!/bin/bash
+# AppRun — запуск Plotter Controller внутри AppImage
+# Надёжный сценарий:
+#  1) порт занят старым «висячим» процессом этого же приложения → убиваем его;
+#     порт занят чужим процессом → выбираем свободный порт (иначе сервер не стартует);
+#  2) ждём готовности сервера (HTTP 200), а не просто фона;
+#  3) сервер упал → автоматический перезапуск (до 5 попыток);
+#  4) если основной сервер так и не поднялся (сбой serialport и т.п.) →
+#     запускается оффлайн-сервер (конвертация работает, печать на плоттер — нет).
+HERE="$(dirname "$(readlink -f "${0}")")"
+APP_DIR="$HERE/usr/lib/app"
+NODE_BIN="$HERE/usr/bin/node"
+
+# В AppImage нет своего udevadm — используем системный для определения списка COM-портов
+if ! command -v udevadm >/dev/null 2>&1; then
+  for d in /sbin /usr/sbin /bin /usr/bin; do
+    if [ -x "$d/udevadm" ]; then export PATH="$PATH:$d"; break; fi
+  done
+fi
+
+BASE_PORT="${PORT:-8765}"
+PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/plotter-controller-$UID.pid"
+
+port_pid() {   # PID процесса, слушающего заданный TCP-порт (или пусто)
+  ss -ltnp 2>/dev/null | awk -v p=":$1" '$4 ~ p"$" {print $NF}' \
+    | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1
+}
+
+is_our_server() {  # принадлежит ли PID этому приложению?
+  local pid="$1"
+  [ -z "$pid" ] && return 1
+  grep -qa "server/server.js\|staticServer.js" "/proc/$pid/cmdline" 2>/dev/null
+}
+
+pick_port() {
+  local p="$BASE_PORT" i
+  for i in $(seq 1 20); do
+    local occupant; occupant="$(port_pid "$p")"
+    if [ -z "$occupant" ]; then echo "$p"; return; fi
+    if is_our_server "$occupant"; then
+      kill "$occupant" 2>/dev/null; sleep 0.4
+      kill -9 "$occupant" 2>/dev/null; sleep 0.2
+      [ -z "$(port_pid "$p")" ] && { echo "$p"; return; }
+    else
+      p=$((p + 1))   # чужой процесс — пробуем следующий порт
+    fi
+  done
+  echo "$p"
+}
+
+export PORT="$(pick_port)"
+
+wait_ready() {  # ждём HTTP-ответ от сервера, максимум ${2:-20} сек
+  local end=$((SECONDS + ${2:-20}))
+  while [ $SECONDS -lt $end ]; do
+    if curl -sf -o /dev/null --max-time 1 "http://localhost:${PORT}/api/status" 2>/dev/null; then return 0; fi
+    # curl может отсутствовать в системе — fallback через node
+    if ! command -v curl >/dev/null 2>&1; then
+      "$NODE_BIN" -e "fetch('http://localhost:${PORT}/api/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null && return 0
+    fi
+    kill -0 "$1" 2>/dev/null || return 1   # процесс умер — выходим рано
+    sleep 0.3
+  done
+  return 1
+}
+
+echo "=================================================="
+echo "  Plotter Controller (GRBL / Scalable Pen Plotter)"
+echo "  Откройте в браузере: http://localhost:${PORT}"
+echo "  Для выхода: кнопка ⏻ Выход в интерфейсе или Ctrl+C"
+echo "=================================================="
+
+open_browser() {
+  for b in xdg-open sensible-browser firefox google-chrome chromium chromium-browser; do
+    if command -v "$b" >/dev/null 2>&1; then
+      ("$b" "http://localhost:${PORT}" >/dev/null 2>&1 &)
+      return 0
+    fi
+  done
+  return 1
+}
+
+SERVER_PID=""
+BROWSER_PID=""
+cleanup() {
+  [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null
+  [ -n "$BROWSER_PID" ] && kill "$BROWSER_PID" 2>/dev/null
+  rm -f "$PIDFILE"
+}
+trap cleanup EXIT INT TERM
+
+start_main() {
+  "$NODE_BIN" "$APP_DIR/server/server.js" &
+  SERVER_PID=$!
+  wait_ready "$SERVER_PID" 25
+}
+
+start_offline() {
+  "$NODE_BIN" "$APP_DIR/server/staticServer.js" &
+  SERVER_PID=$!
+  wait_ready "$SERVER_PID" 15
+}
+
+# --- старт с авто-перезапуском ---
+OK=0
+for attempt in 1 2 3; do
+  if start_main; then OK=1; break; fi
+  echo "[!] Сервер не поднялся (попытка $attempt) — перезапускаю…"
+  kill "$SERVER_PID" 2>/dev/null; sleep 1
+done
+if [ "$OK" = "0" ]; then
+  echo "[!] Основной сервер недоступен. Запускаю оффлайн-режим:"
+  echo "    конвертация SVG/текста/документов работает, печать на плоттер — нет."
+  for attempt in 1 2; do
+    if start_offline; then OK=1; OFFLINE=1; break; fi
+    sleep 1
+  done
+fi
+if [ "$OK" = "0" ]; then
+  echo "[!] Не удалось запустить сервер. Проверьте, что порт ${PORT} свободен,"
+  echo "    или задайте другой: PORT=9000 ./Plotter_Controller.AppImage"
+  exit 1
+fi
+
+echo "$SERVER_PID" > "$PIDFILE"
+[ -n "$OFFLINE" ] && echo "[offline mode]"
+open_browser
+
+# --- watchdog: упал основной сервер → переспускаем (или уходим в оффлайн) ---
+while kill -0 "$SERVER_PID" 2>/dev/null; do sleep 1; done
+wait "$SERVER_PID" 2>/dev/null
+EXIT_CODE=$?
+# Кнопка «Выход» завершает сервер кодом 0 — это штатный выход, не перезапускаем.
+if [ "$EXIT_CODE" = "0" ]; then exit 0; fi
+if [ -n "$OFFLINE" ]; then
+  # оффлайн упал неожиданно — ещё одна попытка основного сервера
+  if start_main; then OFFLINE=""; wait "$SERVER_PID"; exit $?; fi
+  exit "$EXIT_CODE"
+fi
+echo "[!] Сервер аварийно завершился (код $EXIT_CODE) — перезапускаю…"
+if start_main; then wait "$SERVER_PID"; exit $?; fi
+if start_offline; then echo "[offline mode]"; wait "$SERVER_PID"; exit $?; fi
+exit 1
