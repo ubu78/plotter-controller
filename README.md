@@ -1,4 +1,4 @@
-# Plotter Controller
+# Plotter Controller App
 
 Веб-приложение для управления перовым плоттером на базе **GRBL** (например, [Scalable-Pen-Plotter](https://github.com/ubu78/Scalable-Pen-Plotter)) по последовательному порту.
 
